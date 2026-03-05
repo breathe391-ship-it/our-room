@@ -997,8 +997,9 @@ function onYTStateChange(e){
 
 // ── WEBRTC ──
 let peer, localStream, screenStream;
-let mainCall=null, screenCall=null, dataConns=[];
+let mainCall=null, outgoingScreenCall=null, incomingScreenCall=null, dataConns=[];
 let micOn=true, camOn=true, screenSharing=false, retryTimer=null;
+let remotePeerId = null; // stored once video call is established
 
 function sendData(payload){ dataConns.forEach(c=>{try{c.send(payload);}catch(e){}}); }
 
@@ -1059,7 +1060,7 @@ function attemptCall(theirId){
   try{
     const call=peer.call(theirId,localStream,{metadata:{type:'video',role:myRole}});
     if(!call)return;
-    call.on('stream',(s)=>{ clearInterval(retryTimer); mainCall=call; document.getElementById('remote-video').srcObject=s; setConnected(true); });
+    call.on('stream',(s)=>{ clearInterval(retryTimer); mainCall=call; remotePeerId=call.peer; document.getElementById('remote-video').srcObject=s; setConnected(true); });
     call.on('close',()=>{ mainCall=null; setConnected(false); });
     call.on('error',()=>{});
     const dc=peer.connect(theirId,{reliable:true,serialization:'json'});
@@ -1070,12 +1071,17 @@ function attemptCall(theirId){
 function setupListeners(){
   peer.on('call',(call)=>{
     if(call.metadata&&call.metadata.type==='screen'){
+      // Answer with no stream — this is one-way screen share from caller to us
       call.answer();
-      call.on('stream',(s)=>{ showTheirScreen(s); screenCall=call; });
-      call.on('close',hideTheirScreen);
+      call.on('stream',(s)=>{
+        showTheirScreen(s);
+        incomingScreenCall = call;
+      });
+      call.on('close', hideTheirScreen);
+      call.on('error', hideTheirScreen);
     } else {
       call.answer(localStream);
-      call.on('stream',(s)=>{ clearInterval(retryTimer); mainCall=call; document.getElementById('remote-video').srcObject=s; setConnected(true); });
+      call.on('stream',(s)=>{ clearInterval(retryTimer); mainCall=call; remotePeerId=call.peer; document.getElementById('remote-video').srcObject=s; setConnected(true); });
       call.on('close',()=>{ mainCall=null; setConnected(false); });
     }
   });
@@ -1207,25 +1213,35 @@ async function toggleScreenShare(){
   if(screenSharing){ stopScreenShare(); return; }
   try{
     screenStream = await navigator.mediaDevices.getDisplayMedia({ video:true, audio:true });
-    const v = document.getElementById('local-screen-video');
-    v.srcObject = screenStream; v.style.display = 'block';
-    document.getElementById('tray-my-ph').style.display = 'none';
-    const lbl = document.getElementById('tray-my-label');
-    lbl.textContent = (myRole||'you')+"'s screen";
-    lbl.style.display = 'block';
-    screenSharing = true;
-    document.getElementById('screen-btn').classList.add('active');
-    updateTrayPanelStates();
-    updateScreenTab();
-    if(!trayOpen) toggleScreenTray();
-    screenStream.getVideoTracks()[0].onended = () => stopScreenShare();
-    // send to peer
-    if(peer && mainCall){
-      const sc = peer.call(mainCall.peer, screenStream, { metadata:{ type:'screen' } });
-      sc.on('close', () => { screenCall = null; });
-      screenCall = sc;
-    }
-  } catch(e){ showToast('screen share cancelled 🌸'); }
+  } catch(e){ showToast('screen share cancelled 🌸'); return; }
+
+  // Show locally
+  const v = document.getElementById('local-screen-video');
+  v.srcObject = screenStream; v.style.display = 'block';
+  document.getElementById('tray-my-ph').style.display = 'none';
+  const lbl = document.getElementById('tray-my-label');
+  lbl.textContent = (myRole||'you')+"'s screen";
+  lbl.style.display = 'block';
+  screenSharing = true;
+  document.getElementById('screen-btn').classList.add('active');
+  updateTrayPanelStates();
+  updateScreenTab();
+  if(!trayOpen) toggleScreenTray();
+
+  // Stop if they stop sharing the tab
+  screenStream.getVideoTracks()[0].onended = () => stopScreenShare();
+
+  // Find the remote peer ID — stored when video call was established
+  if(peer && remotePeerId){
+    try{
+      const sc = peer.call(remotePeerId, screenStream, { metadata:{ type:'screen' } });
+      if(sc){
+        sc.on('error', ()=>{});
+        sc.on('close', ()=>{ outgoingScreenCall = null; });
+        outgoingScreenCall = sc;
+      }
+    } catch(e){ console.warn('screen call failed', e); }
+  }
 }
 
 function stopScreenShare(){
@@ -1236,7 +1252,7 @@ function stopScreenShare(){
   document.getElementById('tray-my-label').style.display = 'none';
   screenSharing = false;
   document.getElementById('screen-btn').classList.remove('active');
-  if(screenCall){ try{ screenCall.close(); } catch(e){} screenCall = null; }
+  if(outgoingScreenCall){ try{ outgoingScreenCall.close(); } catch(e){} outgoingScreenCall = null; }
   updateTrayPanelStates();
   updateScreenTab();
 }
@@ -1256,12 +1272,13 @@ function toggleCam(){
 function hangUp(){
   clearInterval(retryTimer);
   if(mainCall)try{mainCall.close();}catch(e){}
-  if(screenCall)try{screenCall.close();}catch(e){}
+  if(outgoingScreenCall)try{outgoingScreenCall.close();}catch(e){}
+  if(incomingScreenCall)try{incomingScreenCall.close();}catch(e){}
   dataConns.forEach(c=>{try{c.close();}catch(e){}});dataConns=[];
   if(localStream)localStream.getTracks().forEach(t=>t.stop());
   if(screenStream)screenStream.getTracks().forEach(t=>t.stop());
   if(peer){peer.destroy();peer=null;}
-  mainCall=null;screenCall=null;localStream=null;screenStream=null;
+  mainCall=null; outgoingScreenCall=null; incomingScreenCall=null; localStream=null; screenStream=null; remotePeerId=null;
   // reset screen tray
   trayOpen = false;
   document.getElementById('screen-tray').classList.remove('open');
