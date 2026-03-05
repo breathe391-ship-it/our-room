@@ -309,6 +309,40 @@
     }
     .tray-ph .icon { font-size:1.8rem; }
 
+    /* maximize button on each panel */
+    .tray-maximize {
+      position:absolute; top:7px; right:8px;
+      background:rgba(0,0,0,0.5); border:1px solid rgba(255,255,255,0.25);
+      color:rgba(255,255,255,0.7); border-radius:7px; cursor:pointer;
+      font-size:0.72rem; padding:3px 8px; transition:all 0.2s; z-index:10;
+      display:none;
+    }
+    .tray-panel:hover .tray-maximize,
+    .tray-panel.active-share .tray-maximize { display:block; }
+    .tray-maximize:hover { background:var(--rose); border-color:var(--rose); color:#fff; }
+
+    /* fullscreen overlay for maximized screen */
+    #screen-fullscreen {
+      position:fixed; inset:0; z-index:500;
+      background:#000;
+      display:none; align-items:center; justify-content:center; flex-direction:column;
+    }
+    #screen-fullscreen.open { display:flex; }
+    #screen-fullscreen video { width:100%; height:100%; object-fit:contain; }
+    #screen-fullscreen-close {
+      position:absolute; top:16px; right:18px;
+      background:rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.3);
+      color:#fff; border-radius:999px; padding:6px 16px; cursor:pointer;
+      font-family:'Lato',sans-serif; font-size:0.78rem; letter-spacing:0.08em;
+      text-transform:uppercase; transition:background 0.2s;
+    }
+    #screen-fullscreen-close:hover { background:var(--rose); border-color:var(--rose); }
+    #screen-fullscreen-label {
+      position:absolute; bottom:18px; left:50%; transform:translateX(-50%);
+      background:rgba(0,0,0,0.55); color:#fff; border-radius:999px; padding:4px 16px;
+      font-family:'Dancing Script',cursive; font-size:1rem;
+    }
+
     /* floating tab that peeks above the fold to open/close tray */
     #screen-tab {
       position:fixed; bottom:0; left:50%; transform:translateX(-50%);
@@ -580,13 +614,22 @@
       <div class="tray-ph" id="tray-my-ph"><div class="icon">🖥</div><div id="tray-my-ph-text">your screen</div></div>
       <video id="local-screen-video" autoplay muted playsinline style="display:none;"></video>
       <div class="tray-panel-label" id="tray-my-label" style="display:none;">you</div>
+      <button class="tray-maximize" onclick="maximizeScreen('my')">⛶ expand</button>
     </div>
     <div class="tray-panel" id="tray-their">
       <div class="tray-ph" id="tray-their-ph"><div class="icon">🖥</div><div id="tray-their-ph-text">their screen</div></div>
       <video id="remote-screen-video" autoplay playsinline style="display:none;"></video>
       <div class="tray-panel-label" id="tray-their-label" style="display:none;">them</div>
+      <button class="tray-maximize" onclick="maximizeScreen('their')">⛶ expand</button>
     </div>
   </div>
+</div>
+
+<!-- FULLSCREEN SCREEN OVERLAY -->
+<div id="screen-fullscreen">
+  <button id="screen-fullscreen-close" onclick="closeFullscreen()">✕ close</button>
+  <video id="screen-fullscreen-video" autoplay muted playsinline></video>
+  <div id="screen-fullscreen-label"></div>
 </div>
 
 <div id="toast"></div>
@@ -772,11 +815,16 @@ function bump(type){
   sendData({type:'counter',kind:type,val:type==='kiss'?kissCount:hugCount});
 }
 function animatePetal(emoji){
-  const p=document.createElement('div');
-  p.className='petal'; p.textContent=emoji;
-  p.style.left=(20+Math.random()*60)+'vw';
-  p.style.animationDuration=(2+Math.random()*2)+'s';
-  document.body.appendChild(p); setTimeout(()=>p.remove(),4000);
+  for(let i=0;i<5;i++){
+    const p=document.createElement('div');
+    p.className='petal'; p.textContent=emoji;
+    p.style.left=(10+Math.random()*80)+'vw';
+    p.style.animationDuration=(1.5+Math.random()*2)+'s';
+    p.style.animationDelay=(Math.random()*0.5)+'s';
+    p.style.fontSize=(0.9+Math.random()*0.8)+'rem';
+    document.body.appendChild(p);
+    setTimeout(()=>p.remove(),4000);
+  }
 }
 
 // ── DRAWERS (right) ──
@@ -1050,8 +1098,19 @@ function onData(data){
       showToast('they sent you a poem 🌸');
       break;
     case 'counter':
-      if(data.kind==='kiss'){kissCount=data.val;document.getElementById('kiss-count').textContent=kissCount;animatePetal('💋');}
-      else{hugCount=data.val;document.getElementById('hug-count').textContent=hugCount;animatePetal('🤗');}
+      if(data.kind==='kiss'){
+        kissCount=data.val;
+        document.getElementById('kiss-count').textContent=kissCount;
+        animatePetal('⭐');
+        const kp=document.getElementById('kiss-pill');
+        kp.classList.add('bump'); setTimeout(()=>kp.classList.remove('bump'),400);
+      } else {
+        hugCount=data.val;
+        document.getElementById('hug-count').textContent=hugCount;
+        animatePetal('🤗');
+        const hp=document.getElementById('hug-pill');
+        hp.classList.add('bump'); setTimeout(()=>hp.classList.remove('bump'),400);
+      }
       break;
     case 'queue-sync':
       if(queue.length===0&&data.queue&&data.queue.length>0){
@@ -1080,8 +1139,33 @@ function setConnected(yes){
   if(yes){dot.className='status-dot connected';showToast(other+' is here 💞');}
   else{dot.className='status-dot connecting';showToast(other+' disconnected 🌙');}
 }
-// ── Screen share tray ──
-let trayOpen = false;
+// ── Screen maximize ──
+function maximizeScreen(which){
+  const src = which === 'my'
+    ? document.getElementById('local-screen-video').srcObject
+    : document.getElementById('remote-screen-video').srcObject;
+  if(!src) return;
+  const fv = document.getElementById('screen-fullscreen-video');
+  fv.srcObject = src;
+  fv.muted = (which === 'my'); // mute your own screen audio to avoid echo
+  const lbl = which === 'my'
+    ? (document.getElementById('tray-my-label').textContent || (myRole||'you')+"'s screen")
+    : (document.getElementById('tray-their-label').textContent || 'their screen');
+  document.getElementById('screen-fullscreen-label').textContent = lbl;
+  document.getElementById('screen-fullscreen').classList.add('open');
+}
+function closeFullscreen(){
+  const fv = document.getElementById('screen-fullscreen-video');
+  fv.srcObject = null;
+  document.getElementById('screen-fullscreen').classList.remove('open');
+}
+
+// mark panels as active so expand button shows without hover
+function updateTrayPanelStates(){
+  document.getElementById('tray-my').classList.toggle('active-share', screenSharing);
+  const theirActive = !!document.getElementById('remote-screen-video').srcObject;
+  document.getElementById('tray-their').classList.toggle('active-share', theirActive);
+}
 
 function updateScreenTab(){
   const anyActive = screenSharing || document.getElementById('remote-screen-video').srcObject;
@@ -1100,8 +1184,8 @@ function showTheirScreen(stream){
   const lbl = document.getElementById('tray-their-label');
   lbl.textContent = (myRole==='Navra'?'Baiko':'Navra')+"'s screen";
   lbl.style.display = 'block';
+  updateTrayPanelStates();
   updateScreenTab();
-  // auto-open tray so they notice
   if(!trayOpen) toggleScreenTray();
   showToast('they started sharing their screen 🖥');
 }
@@ -1111,6 +1195,10 @@ function hideTheirScreen(){
   v.style.display = 'none'; v.srcObject = null;
   document.getElementById('tray-their-ph').style.display = 'flex';
   document.getElementById('tray-their-label').style.display = 'none';
+  // close fullscreen if it was showing their screen
+  const fv = document.getElementById('screen-fullscreen-video');
+  if(document.getElementById('screen-fullscreen').classList.contains('open') && fv.srcObject === null) closeFullscreen();
+  updateTrayPanelStates();
   updateScreenTab();
   showToast('they stopped sharing 🌸');
 }
@@ -1127,6 +1215,7 @@ async function toggleScreenShare(){
     lbl.style.display = 'block';
     screenSharing = true;
     document.getElementById('screen-btn').classList.add('active');
+    updateTrayPanelStates();
     updateScreenTab();
     if(!trayOpen) toggleScreenTray();
     screenStream.getVideoTracks()[0].onended = () => stopScreenShare();
@@ -1148,6 +1237,7 @@ function stopScreenShare(){
   screenSharing = false;
   document.getElementById('screen-btn').classList.remove('active');
   if(screenCall){ try{ screenCall.close(); } catch(e){} screenCall = null; }
+  updateTrayPanelStates();
   updateScreenTab();
 }
 
