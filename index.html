@@ -268,35 +268,59 @@
       padding:3px 10px; color:#fff; font-family:'Dancing Script',cursive; font-size:0.82rem;
     }
 
-    /* ── Screen share: their screen big, yours PiP ── */
-    .screen-wrapper {
-      position:relative; width:100%; aspect-ratio:16/9;
-      border-radius:18px; overflow:hidden; background:#0a0a14;
-      border:1.5px solid rgba(201,123,132,0.3); box-shadow:0 4px 22px var(--shadow);
-      display:none; /* hidden until someone shares */
+    /* ── Screen share tray ── */
+    #screen-tray {
+      position:fixed; bottom:0; left:0; right:0; height:44vh; min-height:230px;
+      background:rgba(12,8,16,0.97); border-top:1.5px solid rgba(201,123,132,0.3);
+      box-shadow:0 -6px 40px rgba(0,0,0,0.5); z-index:160;
+      transform:translateY(100%); transition:transform 0.36s cubic-bezier(0.22,1,0.36,1);
+      display:flex; flex-direction:column;
     }
-    .screen-wrapper.visible { display:block; }
-    .screen-main { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; }
-    .screen-main video { width:100%; height:100%; object-fit:contain; display:block; }
-    .screen-pip {
-      position:absolute; bottom:12px; right:12px;
-      width:22%; aspect-ratio:16/9; border-radius:10px; overflow:hidden;
-      border:2px solid rgba(255,255,255,0.4); box-shadow:0 3px 14px rgba(0,0,0,0.5);
-      background:#0a0a14; z-index:5;
-      display:none; /* hidden until local screen share is active */
+    #screen-tray.open { transform:translateY(0); }
+    .tray-bar {
+      display:flex; align-items:center; justify-content:space-between;
+      padding:8px 18px; border-bottom:1px solid rgba(255,255,255,0.06); flex-shrink:0;
     }
-    .screen-pip.visible { display:block; }
-    .screen-pip video { width:100%; height:100%; object-fit:contain; display:block; }
-    .screen-placeholder {
-      display:flex; align-items:center; justify-content:center; height:100%; width:100%;
-      color:rgba(255,255,255,0.25); font-family:'Playfair Display',serif;
-      font-style:italic; font-size:0.85rem; flex-direction:column; gap:8px;
+    .tray-title { font-family:'Dancing Script',cursive; font-size:1rem; color:var(--rose-light); }
+    .tray-close {
+      width:26px; height:26px; border-radius:50%; border:1px solid rgba(255,255,255,0.2);
+      background:none; color:rgba(255,255,255,0.5); cursor:pointer; font-size:0.8rem;
+      display:flex; align-items:center; justify-content:center; transition:all 0.2s;
     }
-    .screen-placeholder .icon { font-size:2rem; }
-    .screen-label {
-      position:absolute; bottom:10px; left:12px; z-index:6;
-      background:rgba(0,0,0,0.5); color:#fff; border-radius:999px; padding:3px 10px; font-size:0.72rem;
+    .tray-close:hover { background:var(--rose); border-color:var(--rose); color:#fff; }
+    .tray-screens {
+      flex:1; display:grid; grid-template-columns:1fr 1fr; gap:10px; padding:10px 16px; overflow:hidden;
     }
+    .tray-panel {
+      position:relative; border-radius:12px; overflow:hidden;
+      background:#0a0014; border:1.5px solid rgba(201,123,132,0.18);
+      display:flex; align-items:center; justify-content:center;
+    }
+    .tray-panel video { width:100%; height:100%; object-fit:contain; display:block; }
+    .tray-panel-label {
+      position:absolute; bottom:7px; left:10px;
+      background:rgba(0,0,0,0.6); color:#fff; border-radius:999px;
+      padding:2px 10px; font-family:'Dancing Script',cursive; font-size:0.82rem;
+    }
+    .tray-ph {
+      display:flex; flex-direction:column; align-items:center; justify-content:center;
+      gap:6px; color:rgba(255,255,255,0.2);
+      font-family:'Playfair Display',serif; font-style:italic; font-size:0.78rem; text-align:center;
+    }
+    .tray-ph .icon { font-size:1.8rem; }
+
+    /* floating tab that peeks above the fold to open/close tray */
+    #screen-tab {
+      position:fixed; bottom:0; left:50%; transform:translateX(-50%);
+      background:rgba(12,8,16,0.9); border:1.5px solid rgba(201,123,132,0.3);
+      border-bottom:none; border-radius:10px 10px 0 0;
+      padding:5px 20px 4px; cursor:pointer; z-index:161;
+      color:var(--rose-light); font-size:0.72rem; letter-spacing:0.1em;
+      text-transform:uppercase; font-family:'Lato',sans-serif;
+      transition:background 0.2s; display:none; white-space:nowrap;
+    }
+    #screen-tab:hover { background:rgba(201,123,132,0.2); }
+    #screen-tab.show { display:block; }
     /* ── LEFT DRAWERS (todo / done) ── */
     .drawer-left {
       position:fixed; top:0; left:0; width:min(380px,100vw); height:100vh;
@@ -540,20 +564,30 @@
       <button class="ctrl-btn danger"           onclick="hangUp()"            title="hang up">📵</button>
     </div>
 
-    <!-- Screens: their screen big, mine as PiP -->
-    <div class="screen-wrapper" id="screen-wrapper">
-      <div class="screen-main" id="remote-screen-main">
-        <div class="screen-placeholder" id="their-screen-ph"><div class="icon">🖥</div><div id="their-screen-ph-text">their screen</div></div>
-        <video id="remote-screen-video" autoplay playsinline style="display:none;"></video>
-      </div>
-      <div class="screen-pip" id="my-screen-pip">
-        <div class="screen-placeholder" id="my-screen-ph"><div class="icon">🖥</div><div id="my-screen-ph-text">your screen</div></div>
-        <video id="local-screen-video" autoplay muted playsinline style="display:none;"></video>
-      </div>
-      <div class="screen-label" id="their-screen-label" style="display:none;">their screen</div>
-    </div>
+    <!-- Screens: slide-up tray, both shown side by side -->
   </div>
 </main>
+
+<!-- SCREEN SHARE TRAY -->
+<div id="screen-tab" onclick="toggleScreenTray()">🖥 screens</div>
+<div id="screen-tray">
+  <div class="tray-bar">
+    <div class="tray-title">🖥 screens</div>
+    <button class="tray-close" onclick="toggleScreenTray()">✕</button>
+  </div>
+  <div class="tray-screens">
+    <div class="tray-panel" id="tray-my">
+      <div class="tray-ph" id="tray-my-ph"><div class="icon">🖥</div><div id="tray-my-ph-text">your screen</div></div>
+      <video id="local-screen-video" autoplay muted playsinline style="display:none;"></video>
+      <div class="tray-panel-label" id="tray-my-label" style="display:none;">you</div>
+    </div>
+    <div class="tray-panel" id="tray-their">
+      <div class="tray-ph" id="tray-their-ph"><div class="icon">🖥</div><div id="tray-their-ph-text">their screen</div></div>
+      <video id="remote-screen-video" autoplay playsinline style="display:none;"></video>
+      <div class="tray-panel-label" id="tray-their-label" style="display:none;">them</div>
+    </div>
+  </div>
+</div>
 
 <div id="toast"></div>
 
@@ -723,6 +757,8 @@ function checkGate(){
   document.getElementById('their-screen-label').textContent = other+"'s screen";
   document.getElementById('their-screen-ph-text').textContent = other+"'s screen";
   document.getElementById('my-screen-ph-text').textContent = myRole+"'s screen";
+  document.getElementById('tray-my-ph-text').textContent = myRole+"'s screen";
+  document.getElementById('tray-their-ph-text').textContent = other+"'s screen";
   showToast('welcome, '+myRole+' 🌸');
 }
 
@@ -1044,43 +1080,57 @@ function setConnected(yes){
   if(yes){dot.className='status-dot connected';showToast(other+' is here 💞');}
   else{dot.className='status-dot connecting';showToast(other+' disconnected 🌙');}
 }
-// ── Screen share helpers ──
-function showScreenWrapper(){ document.getElementById('screen-wrapper').classList.add('visible'); }
-function hideScreenWrapperIfEmpty(){
-  const remoteActive = document.getElementById('remote-screen-video').style.display !== 'none';
-  const localActive  = screenSharing;
-  if(!remoteActive && !localActive) document.getElementById('screen-wrapper').classList.remove('visible');
+// ── Screen share tray ──
+let trayOpen = false;
+
+function updateScreenTab(){
+  const anyActive = screenSharing || document.getElementById('remote-screen-video').srcObject;
+  document.getElementById('screen-tab').classList.toggle('show', !!anyActive);
+}
+
+function toggleScreenTray(){
+  trayOpen = !trayOpen;
+  document.getElementById('screen-tray').classList.toggle('open', trayOpen);
 }
 
 function showTheirScreen(stream){
-  showScreenWrapper();
   const v = document.getElementById('remote-screen-video');
   v.srcObject = stream; v.style.display = 'block';
-  document.getElementById('their-screen-ph').style.display = 'none';
-  document.getElementById('their-screen-label').style.display = 'block';
+  document.getElementById('tray-their-ph').style.display = 'none';
+  const lbl = document.getElementById('tray-their-label');
+  lbl.textContent = (myRole==='Navra'?'Baiko':'Navra')+"'s screen";
+  lbl.style.display = 'block';
+  updateScreenTab();
+  // auto-open tray so they notice
+  if(!trayOpen) toggleScreenTray();
+  showToast('they started sharing their screen 🖥');
 }
+
 function hideTheirScreen(){
   const v = document.getElementById('remote-screen-video');
   v.style.display = 'none'; v.srcObject = null;
-  document.getElementById('their-screen-ph').style.display = 'flex';
-  document.getElementById('their-screen-label').style.display = 'none';
-  hideScreenWrapperIfEmpty();
+  document.getElementById('tray-their-ph').style.display = 'flex';
+  document.getElementById('tray-their-label').style.display = 'none';
+  updateScreenTab();
+  showToast('they stopped sharing 🌸');
 }
 
 async function toggleScreenShare(){
   if(screenSharing){ stopScreenShare(); return; }
   try{
     screenStream = await navigator.mediaDevices.getDisplayMedia({ video:true, audio:true });
-    showScreenWrapper();
-    const pip = document.getElementById('my-screen-pip');
-    const v   = document.getElementById('local-screen-video');
-    pip.classList.add('visible');
+    const v = document.getElementById('local-screen-video');
     v.srcObject = screenStream; v.style.display = 'block';
-    document.getElementById('my-screen-ph').style.display = 'none';
+    document.getElementById('tray-my-ph').style.display = 'none';
+    const lbl = document.getElementById('tray-my-label');
+    lbl.textContent = (myRole||'you')+"'s screen";
+    lbl.style.display = 'block';
     screenSharing = true;
     document.getElementById('screen-btn').classList.add('active');
+    updateScreenTab();
+    if(!trayOpen) toggleScreenTray();
     screenStream.getVideoTracks()[0].onended = () => stopScreenShare();
-    // Send to peer
+    // send to peer
     if(peer && mainCall){
       const sc = peer.call(mainCall.peer, screenStream, { metadata:{ type:'screen' } });
       sc.on('close', () => { screenCall = null; });
@@ -1091,15 +1141,14 @@ async function toggleScreenShare(){
 
 function stopScreenShare(){
   if(screenStream){ screenStream.getTracks().forEach(t => t.stop()); screenStream = null; }
-  const pip = document.getElementById('my-screen-pip');
-  const v   = document.getElementById('local-screen-video');
-  pip.classList.remove('visible');
+  const v = document.getElementById('local-screen-video');
   v.style.display = 'none'; v.srcObject = null;
-  document.getElementById('my-screen-ph').style.display = 'flex';
+  document.getElementById('tray-my-ph').style.display = 'flex';
+  document.getElementById('tray-my-label').style.display = 'none';
   screenSharing = false;
   document.getElementById('screen-btn').classList.remove('active');
   if(screenCall){ try{ screenCall.close(); } catch(e){} screenCall = null; }
-  hideScreenWrapperIfEmpty();
+  updateScreenTab();
 }
 
 function toggleMic(){
@@ -1123,6 +1172,18 @@ function hangUp(){
   if(screenStream)screenStream.getTracks().forEach(t=>t.stop());
   if(peer){peer.destroy();peer=null;}
   mainCall=null;screenCall=null;localStream=null;screenStream=null;
+  // reset screen tray
+  trayOpen = false;
+  document.getElementById('screen-tray').classList.remove('open');
+  document.getElementById('screen-tab').classList.remove('show');
+  document.getElementById('local-screen-video').style.display='none';
+  document.getElementById('local-screen-video').srcObject=null;
+  document.getElementById('remote-screen-video').style.display='none';
+  document.getElementById('remote-screen-video').srcObject=null;
+  document.getElementById('tray-my-ph').style.display='flex';
+  document.getElementById('tray-their-ph').style.display='flex';
+  document.getElementById('tray-my-label').style.display='none';
+  document.getElementById('tray-their-label').style.display='none';
   document.getElementById('video-section').style.display='none';
   document.getElementById('connect-panel').style.display='block';
   document.getElementById('connect-btn').disabled=false;
