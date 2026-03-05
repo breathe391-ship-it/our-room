@@ -279,17 +279,18 @@
     #screen-tray.open { transform:translateY(0); }
     .tray-bar {
       display:flex; align-items:center; justify-content:space-between;
-      padding:8px 18px; border-bottom:1px solid rgba(255,255,255,0.06); flex-shrink:0;
+      padding:10px 18px 8px; border-bottom:1px solid rgba(255,255,255,0.06);
+      flex-shrink:0; cursor:pointer;
     }
-    .tray-title { font-family:'Dancing Script',cursive; font-size:1rem; color:var(--rose-light); }
+    .tray-title { font-family:'Dancing Script',cursive; font-size:1rem; color:var(--rose-light); pointer-events:none; }
     .tray-close {
-      width:26px; height:26px; border-radius:50%; border:1px solid rgba(255,255,255,0.2);
-      background:none; color:rgba(255,255,255,0.5); cursor:pointer; font-size:0.8rem;
+      width:28px; height:28px; border-radius:50%; border:1px solid rgba(255,255,255,0.2);
+      background:none; color:rgba(255,255,255,0.6); cursor:pointer; font-size:0.85rem;
       display:flex; align-items:center; justify-content:center; transition:all 0.2s;
     }
     .tray-close:hover { background:var(--rose); border-color:var(--rose); color:#fff; }
     .tray-screens {
-      flex:1; display:grid; grid-template-columns:1fr 1fr; gap:10px; padding:10px 16px; overflow:hidden;
+      flex:1; display:grid; grid-template-columns:1fr 1fr; gap:10px; padding:10px 16px 14px; overflow:hidden;
     }
     .tray-panel {
       position:relative; border-radius:12px; overflow:hidden;
@@ -343,18 +344,22 @@
       font-family:'Dancing Script',cursive; font-size:1rem;
     }
 
-    /* floating tab that peeks above the fold to open/close tray */
+    /* floating tab */
     #screen-tab {
       position:fixed; bottom:0; left:50%; transform:translateX(-50%);
-      background:rgba(12,8,16,0.9); border:1.5px solid rgba(201,123,132,0.3);
+      background:rgba(12,8,16,0.92); border:1.5px solid rgba(201,123,132,0.4);
       border-bottom:none; border-radius:10px 10px 0 0;
-      padding:5px 20px 4px; cursor:pointer; z-index:161;
+      padding:6px 22px 5px; cursor:pointer; z-index:162;
       color:var(--rose-light); font-size:0.72rem; letter-spacing:0.1em;
       text-transform:uppercase; font-family:'Lato',sans-serif;
-      transition:background 0.2s; display:none; white-space:nowrap;
+      transition:background 0.2s, opacity 0.2s;
+      display:none; white-space:nowrap; user-select:none;
     }
-    #screen-tab:hover { background:rgba(201,123,132,0.2); }
+    #screen-tab:hover { background:rgba(201,123,132,0.25); }
     #screen-tab.show { display:block; }
+    /* when tray is open, tab sits on top of tray as a close handle */
+    #screen-tray.open ~ #screen-tab,
+    #screen-tab.tray-open { background:rgba(201,123,132,0.3); }
     /* ── LEFT DRAWERS (todo / done) ── */
     .drawer-left {
       position:fixed; top:0; left:0; width:min(380px,100vw); height:100vh;
@@ -603,11 +608,12 @@
 </main>
 
 <!-- SCREEN SHARE TRAY -->
-<div id="screen-tab" onclick="toggleScreenTray()">🖥 screens</div>
+<!-- Tab always sits at bottom edge; clicking it opens/closes the tray -->
+<div id="screen-tab" onclick="toggleScreenTray()">🖥 screens ↑</div>
 <div id="screen-tray">
-  <div class="tray-bar">
+  <div class="tray-bar" onclick="toggleScreenTray()">
     <div class="tray-title">🖥 screens</div>
-    <button class="tray-close" onclick="toggleScreenTray()">✕</button>
+    <button class="tray-close" onclick="event.stopPropagation();toggleScreenTray()">✕</button>
   </div>
   <div class="tray-screens">
     <div class="tray-panel" id="tray-my">
@@ -998,8 +1004,9 @@ function onYTStateChange(e){
 // ── WEBRTC ──
 let peer, localStream, screenStream;
 let mainCall=null, outgoingScreenCall=null, incomingScreenCall=null, dataConns=[];
+let screenPeer=null, receiverScreenPeer=null;
 let micOn=true, camOn=true, screenSharing=false, retryTimer=null;
-let remotePeerId = null; // stored once video call is established
+let remotePeerId = null;
 
 function sendData(payload){ dataConns.forEach(c=>{try{c.send(payload);}catch(e){}}); }
 
@@ -1070,20 +1077,11 @@ function attemptCall(theirId){
 }
 function setupListeners(){
   peer.on('call',(call)=>{
-    if(call.metadata&&call.metadata.type==='screen'){
-      // Answer with no stream — this is one-way screen share from caller to us
-      call.answer();
-      call.on('stream',(s)=>{
-        showTheirScreen(s);
-        incomingScreenCall = call;
-      });
-      call.on('close', hideTheirScreen);
-      call.on('error', hideTheirScreen);
-    } else {
-      call.answer(localStream);
-      call.on('stream',(s)=>{ clearInterval(retryTimer); mainCall=call; remotePeerId=call.peer; document.getElementById('remote-video').srcObject=s; setConnected(true); });
-      call.on('close',()=>{ mainCall=null; setConnected(false); });
-    }
+    // Only handle video calls here — screen calls handled by receiverScreenPeer
+    if(call.metadata && call.metadata.type==='screen') return;
+    call.answer(localStream);
+    call.on('stream',(s)=>{ clearInterval(retryTimer); mainCall=call; remotePeerId=call.peer; document.getElementById('remote-video').srcObject=s; setConnected(true); });
+    call.on('close',()=>{ mainCall=null; setConnected(false); });
   });
   peer.on('connection',(conn)=>{
     conn.on('open',()=>addDC(conn)); conn.on('data',onData);
@@ -1142,8 +1140,36 @@ function onData(data){
 function setConnected(yes){
   const dot=document.getElementById('status-dot');
   const other=myRole==='Navra'?'Baiko':'Navra';
-  if(yes){dot.className='status-dot connected';showToast(other+' is here 💞');}
+  if(yes){
+    dot.className='status-dot connected';
+    showToast(other+' is here 💞');
+    startScreenReceiver(); // start listening for their screen share
+  }
   else{dot.className='status-dot connecting';showToast(other+' disconnected 🌙');}
+}
+
+function startScreenReceiver(){
+  if(receiverScreenPeer){ return; } // already listening
+  const mySuffix = myRole === 'Navra' ? 'navra' : 'baiko';
+  const theirSuffix = myRole === 'Navra' ? 'baiko' : 'navra';
+  const roomId = document.getElementById('room-input').value.trim().toLowerCase().replace(/\s+/g,'-');
+  const myScreenReceiveId = 'lr2-scr-' + roomId + '-' + theirSuffix; // I receive on THEIR outgoing ID? No —
+  // Convention: Navra sends on lr2-scr-room-navra, Baiko listens on lr2-scr-room-navra (calls baiko)
+  // So receiver peer ID = lr2-scr-rcv-room-mySuffix
+  const rcvId = 'lr2-scr-rcv-' + roomId + '-' + mySuffix;
+  receiverScreenPeer = new Peer(rcvId, { debug: 0 });
+  receiverScreenPeer.on('open', () => {
+    receiverScreenPeer.on('call', (call) => {
+      call.answer(); // no stream — we just receive
+      call.on('stream', (s) => {
+        showTheirScreen(s);
+        incomingScreenCall = call;
+      });
+      call.on('close', hideTheirScreen);
+      call.on('error', hideTheirScreen);
+    });
+  });
+  receiverScreenPeer.on('error', (e) => { console.warn('rcvScreenPeer err', e); });
 }
 // ── Screen maximize ──
 function maximizeScreen(which){
@@ -1173,14 +1199,22 @@ function updateTrayPanelStates(){
   document.getElementById('tray-their').classList.toggle('active-share', theirActive);
 }
 
-function updateScreenTab(){
-  const anyActive = screenSharing || document.getElementById('remote-screen-video').srcObject;
-  document.getElementById('screen-tab').classList.toggle('show', !!anyActive);
-}
-
 function toggleScreenTray(){
   trayOpen = !trayOpen;
-  document.getElementById('screen-tray').classList.toggle('open', trayOpen);
+  const tray = document.getElementById('screen-tray');
+  const tab  = document.getElementById('screen-tab');
+  tray.classList.toggle('open', trayOpen);
+  tab.textContent = trayOpen ? '🖥 screens ↓' : '🖥 screens ↑';
+}
+
+function updateScreenTab(){
+  // Show tab whenever a screen is active OR always after connected
+  const anyActive = screenSharing || !!(document.getElementById('remote-screen-video').srcObject);
+  document.getElementById('screen-tab').classList.toggle('show', anyActive);
+  if(anyActive && !trayOpen) {
+    // auto open tray when share starts
+    toggleScreenTray();
+  }
 }
 
 function showTheirScreen(stream){
@@ -1192,7 +1226,6 @@ function showTheirScreen(stream){
   lbl.style.display = 'block';
   updateTrayPanelStates();
   updateScreenTab();
-  if(!trayOpen) toggleScreenTray();
   showToast('they started sharing their screen 🖥');
 }
 
@@ -1212,10 +1245,10 @@ function hideTheirScreen(){
 async function toggleScreenShare(){
   if(screenSharing){ stopScreenShare(); return; }
   try{
-    screenStream = await navigator.mediaDevices.getDisplayMedia({ video:true, audio:true });
+    screenStream = await navigator.mediaDevices.getDisplayMedia({ video:true, audio:false });
   } catch(e){ showToast('screen share cancelled 🌸'); return; }
 
-  // Show locally
+  // Show locally in tray
   const v = document.getElementById('local-screen-video');
   v.srcObject = screenStream; v.style.display = 'block';
   document.getElementById('tray-my-ph').style.display = 'none';
@@ -1226,22 +1259,28 @@ async function toggleScreenShare(){
   document.getElementById('screen-btn').classList.add('active');
   updateTrayPanelStates();
   updateScreenTab();
-  if(!trayOpen) toggleScreenTray();
 
-  // Stop if they stop sharing the tab
+  // Stop when user hits "stop sharing" in browser
   screenStream.getVideoTracks()[0].onended = () => stopScreenShare();
 
-  // Find the remote peer ID — stored when video call was established
-  if(peer && remotePeerId){
-    try{
-      const sc = peer.call(remotePeerId, screenStream, { metadata:{ type:'screen' } });
-      if(sc){
-        sc.on('error', ()=>{});
-        sc.on('close', ()=>{ outgoingScreenCall = null; });
-        outgoingScreenCall = sc;
-      }
-    } catch(e){ console.warn('screen call failed', e); }
-  }
+  // Use dedicated screen-share peer IDs (avoids collision with main video call)
+  const mySuffix    = myRole === 'Navra' ? 'navra' : 'baiko';
+  const theirSuffix = myRole === 'Navra' ? 'baiko' : 'navra';
+  const roomId = document.getElementById('room-input').value.trim().toLowerCase().replace(/\s+/g,'-');
+  const screenSendId  = 'lr2-scr-snd-' + roomId + '-' + mySuffix;
+  const theirRcvId    = 'lr2-scr-rcv-' + roomId + '-' + theirSuffix;
+
+  if(screenPeer){ try{ screenPeer.destroy(); } catch(e){} screenPeer = null; }
+  screenPeer = new Peer(screenSendId, { debug: 0 });
+  screenPeer.on('open', () => {
+    const sc = screenPeer.call(theirRcvId, screenStream);
+    if(sc){
+      sc.on('error', ()=>{});
+      sc.on('close', ()=>{ outgoingScreenCall = null; });
+      outgoingScreenCall = sc;
+    }
+  });
+  screenPeer.on('error', (e) => { console.warn('screenPeer error', e); });
 }
 
 function stopScreenShare(){
@@ -1253,6 +1292,7 @@ function stopScreenShare(){
   screenSharing = false;
   document.getElementById('screen-btn').classList.remove('active');
   if(outgoingScreenCall){ try{ outgoingScreenCall.close(); } catch(e){} outgoingScreenCall = null; }
+  if(screenPeer){ try{ screenPeer.destroy(); } catch(e){} screenPeer = null; }
   updateTrayPanelStates();
   updateScreenTab();
 }
@@ -1278,6 +1318,8 @@ function hangUp(){
   if(localStream)localStream.getTracks().forEach(t=>t.stop());
   if(screenStream)screenStream.getTracks().forEach(t=>t.stop());
   if(peer){peer.destroy();peer=null;}
+  if(screenPeer){try{screenPeer.destroy();}catch(e){} screenPeer=null;}
+  if(receiverScreenPeer){try{receiverScreenPeer.destroy();}catch(e){} receiverScreenPeer=null;}
   mainCall=null; outgoingScreenCall=null; incomingScreenCall=null; localStream=null; screenStream=null; remotePeerId=null;
   // reset screen tray
   trayOpen = false;
