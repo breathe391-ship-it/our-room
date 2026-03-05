@@ -273,18 +273,22 @@
       position:relative; width:100%; aspect-ratio:16/9;
       border-radius:18px; overflow:hidden; background:#0a0a14;
       border:1.5px solid rgba(201,123,132,0.3); box-shadow:0 4px 22px var(--shadow);
+      display:none; /* hidden until someone shares */
     }
-    .screen-main { position:absolute; inset:0; }
+    .screen-wrapper.visible { display:block; }
+    .screen-main { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; }
     .screen-main video { width:100%; height:100%; object-fit:contain; display:block; }
     .screen-pip {
       position:absolute; bottom:12px; right:12px;
       width:22%; aspect-ratio:16/9; border-radius:10px; overflow:hidden;
       border:2px solid rgba(255,255,255,0.4); box-shadow:0 3px 14px rgba(0,0,0,0.5);
       background:#0a0a14; z-index:5;
+      display:none; /* hidden until local screen share is active */
     }
+    .screen-pip.visible { display:block; }
     .screen-pip video { width:100%; height:100%; object-fit:contain; display:block; }
     .screen-placeholder {
-      display:flex; align-items:center; justify-content:center; height:100%;
+      display:flex; align-items:center; justify-content:center; height:100%; width:100%;
       color:rgba(255,255,255,0.25); font-family:'Playfair Display',serif;
       font-style:italic; font-size:0.85rem; flex-direction:column; gap:8px;
     }
@@ -460,7 +464,7 @@
 <div class="drawer" id="drawer-music">
   <div class="drawer-header">
     <div class="drawer-title">🎵 our soundtrack</div>
-    <button class="drawer-close" onclick="closeDrawers()">✕</button>
+    <button class="drawer-close" onclick="closeAllDrawers()">✕</button>
   </div>
   <div class="drawer-body">
     <div id="yt-player-wrap"><div id="yt-player"></div></div>
@@ -477,7 +481,7 @@
 <div class="drawer" id="drawer-poems">
   <div class="drawer-header">
     <div class="drawer-title">🌸 poems &amp; whispers</div>
-    <button class="drawer-close" onclick="closeDrawers()">✕</button>
+    <button class="drawer-close" onclick="closeAllDrawers()">✕</button>
   </div>
   <div class="drawer-body">
     <div class="poem-section">
@@ -546,7 +550,7 @@
         <div class="screen-placeholder" id="my-screen-ph"><div class="icon">🖥</div><div id="my-screen-ph-text">your screen</div></div>
         <video id="local-screen-video" autoplay muted playsinline style="display:none;"></video>
       </div>
-      <div class="screen-label" id="their-screen-label">their screen</div>
+      <div class="screen-label" id="their-screen-label" style="display:none;">their screen</div>
     </div>
   </div>
 </main>
@@ -1040,16 +1044,64 @@ function setConnected(yes){
   if(yes){dot.className='status-dot connected';showToast(other+' is here 💞');}
   else{dot.className='status-dot connecting';showToast(other+' disconnected 🌙');}
 }
+// ── Screen share helpers ──
+function showScreenWrapper(){ document.getElementById('screen-wrapper').classList.add('visible'); }
+function hideScreenWrapperIfEmpty(){
+  const remoteActive = document.getElementById('remote-screen-video').style.display !== 'none';
+  const localActive  = screenSharing;
+  if(!remoteActive && !localActive) document.getElementById('screen-wrapper').classList.remove('visible');
+}
+
 function showTheirScreen(stream){
-  const v=document.getElementById('remote-screen-video');
-  v.srcObject=stream; v.style.display='block';
-  document.getElementById('remote-screen-main').querySelector('.screen-placeholder').style.display='none';
+  showScreenWrapper();
+  const v = document.getElementById('remote-screen-video');
+  v.srcObject = stream; v.style.display = 'block';
+  document.getElementById('their-screen-ph').style.display = 'none';
+  document.getElementById('their-screen-label').style.display = 'block';
 }
 function hideTheirScreen(){
-  const v=document.getElementById('remote-screen-video');
-  v.style.display='none'; v.srcObject=null;
-  document.getElementById('remote-screen-main').querySelector('.screen-placeholder').style.display='flex';
+  const v = document.getElementById('remote-screen-video');
+  v.style.display = 'none'; v.srcObject = null;
+  document.getElementById('their-screen-ph').style.display = 'flex';
+  document.getElementById('their-screen-label').style.display = 'none';
+  hideScreenWrapperIfEmpty();
 }
+
+async function toggleScreenShare(){
+  if(screenSharing){ stopScreenShare(); return; }
+  try{
+    screenStream = await navigator.mediaDevices.getDisplayMedia({ video:true, audio:true });
+    showScreenWrapper();
+    const pip = document.getElementById('my-screen-pip');
+    const v   = document.getElementById('local-screen-video');
+    pip.classList.add('visible');
+    v.srcObject = screenStream; v.style.display = 'block';
+    document.getElementById('my-screen-ph').style.display = 'none';
+    screenSharing = true;
+    document.getElementById('screen-btn').classList.add('active');
+    screenStream.getVideoTracks()[0].onended = () => stopScreenShare();
+    // Send to peer
+    if(peer && mainCall){
+      const sc = peer.call(mainCall.peer, screenStream, { metadata:{ type:'screen' } });
+      sc.on('close', () => { screenCall = null; });
+      screenCall = sc;
+    }
+  } catch(e){ showToast('screen share cancelled 🌸'); }
+}
+
+function stopScreenShare(){
+  if(screenStream){ screenStream.getTracks().forEach(t => t.stop()); screenStream = null; }
+  const pip = document.getElementById('my-screen-pip');
+  const v   = document.getElementById('local-screen-video');
+  pip.classList.remove('visible');
+  v.style.display = 'none'; v.srcObject = null;
+  document.getElementById('my-screen-ph').style.display = 'flex';
+  screenSharing = false;
+  document.getElementById('screen-btn').classList.remove('active');
+  if(screenCall){ try{ screenCall.close(); } catch(e){} screenCall = null; }
+  hideScreenWrapperIfEmpty();
+}
+
 function toggleMic(){
   if(!localStream)return; micOn=!micOn;
   localStream.getAudioTracks().forEach(t=>t.enabled=micOn);
@@ -1061,29 +1113,6 @@ function toggleCam(){
   localStream.getVideoTracks().forEach(t=>t.enabled=camOn);
   document.getElementById('cam-btn').textContent=camOn?'📷':'🙈';
   document.getElementById('cam-btn').classList.toggle('active',!camOn);
-}
-async function toggleScreenShare(){
-  if(screenSharing){stopScreenShare();return;}
-  try{
-    screenStream=await navigator.mediaDevices.getDisplayMedia({video:true,audio:true});
-    const v=document.getElementById('local-screen-video');
-    v.srcObject=screenStream; v.style.display='block';
-    document.getElementById('my-screen-pip').querySelector('.screen-placeholder').style.display='none';
-    screenSharing=true; document.getElementById('screen-btn').classList.add('active');
-    screenStream.getVideoTracks()[0].onended=()=>stopScreenShare();
-    if(peer&&mainCall){
-      const sc=peer.call(mainCall.peer,screenStream,{metadata:{type:'screen'}});
-      sc.on('close',()=>{screenCall=null;}); screenCall=sc;
-    }
-  }catch(e){showToast('screen share cancelled 🌸');}
-}
-function stopScreenShare(){
-  if(screenStream){screenStream.getTracks().forEach(t=>t.stop());screenStream=null;}
-  const v=document.getElementById('local-screen-video');
-  v.style.display='none'; v.srcObject=null;
-  document.getElementById('my-screen-pip').querySelector('.screen-placeholder').style.display='flex';
-  screenSharing=false; document.getElementById('screen-btn').classList.remove('active');
-  if(screenCall){try{screenCall.close();}catch(e){} screenCall=null;}
 }
 function hangUp(){
   clearInterval(retryTimer);
