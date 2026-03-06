@@ -984,7 +984,7 @@ function renderQueue(){
 function playQueueItem(idx,broadcast=false){
   if(idx<0||idx>=queue.length)return;
   currentQueueIdx=idx;
-  if(ytReady){ignoreYT=true;ytPlayer.loadVideoById(queue[idx].id,0);setTimeout(()=>ignoreYT=false,1500);}
+  if(ytReady){ignoreYT=true;ytPlayer.loadVideoById(queue[idx].id,0);setTimeout(()=>ignoreYT=false,2000);}
   renderQueue();
   if(broadcast) sendData({type:'queue-play',idx,seekTo:0});
 }
@@ -1115,14 +1115,22 @@ function attemptCall(theirId){
 }
 function setupListeners(){
   peer.on('call',(call)=>{
-    // Only handle video calls here — screen calls handled by receiverScreenPeer
     if(call.metadata && call.metadata.type==='screen') return;
     call.answer(localStream);
     call.on('stream',(s)=>{ clearInterval(retryTimer); mainCall=call; remotePeerId=call.peer; document.getElementById('remote-video').srcObject=s; setConnected(true); });
     call.on('close',()=>{ mainCall=null; setConnected(false); });
   });
   peer.on('connection',(conn)=>{
-    conn.on('open',()=>addDC(conn)); conn.on('data',onData);
+    conn.on('open',()=>{
+      addDC(conn);
+      // Send our state to whoever just connected
+      if(queue.length>0){
+        const seekTo = (ytReady && currentQueueIdx>=0) ? (ytPlayer.getCurrentTime()||0) : 0;
+        conn.send({type:'queue-sync',queue,currentQueueIdx,seekTo});
+      }
+      if(chatHistory.length>0) conn.send({type:'chat-history',messages:chatHistory});
+    });
+    conn.on('data',onData);
     conn.on('close',()=>remDC(conn)); conn.on('error',()=>remDC(conn));
   });
   peer.on('error',peerErr);
@@ -1176,13 +1184,16 @@ function onData(data){
     case 'queue-sync':
       if(data.queue && data.queue.length>0){
         queue=data.queue; currentQueueIdx=data.currentQueueIdx??-1; renderQueue();
-        if(currentQueueIdx>=0 && ytReady){
-          ignoreYT=true;
-          if(data.seekTo!=null) ytPlayer.loadVideoById(queue[currentQueueIdx].id, data.seekTo);
-          else ytPlayer.cueVideoById(queue[currentQueueIdx].id);
-          setTimeout(()=>ignoreYT=false,1500);
+        if(currentQueueIdx>=0){
+          const doPlay = ()=>{
+            ignoreYT=true;
+            ytPlayer.loadVideoById(queue[currentQueueIdx].id, data.seekTo||0);
+            setTimeout(()=>ignoreYT=false,2000);
+          };
+          if(ytReady) doPlay();
+          else { const t=setInterval(()=>{ if(ytReady){clearInterval(t);doPlay();} },300); }
         }
-        showToast('queue synced ♪');
+        showToast('♪ music synced');
       }
       break;
     case 'list-sync':
@@ -1191,14 +1202,15 @@ function onData(data){
       showToast((data.listType==='todo'?'to do':'done')+' list updated ✓');
       break;
     case 'queue-play':
-      if(data.idx>=0&&data.idx<queue.length){
-        currentQueueIdx=data.idx;
-        if(ytReady){
+      if(data.idx>=0 && data.idx<queue.length){
+        currentQueueIdx=data.idx; renderQueue();
+        const doPlay2 = ()=>{
           ignoreYT=true;
           ytPlayer.loadVideoById(queue[data.idx].id, data.seekTo||0);
-          setTimeout(()=>ignoreYT=false,1500);
-        }
-        renderQueue();
+          setTimeout(()=>ignoreYT=false,2000);
+        };
+        if(ytReady) doPlay2();
+        else { const t=setInterval(()=>{ if(ytReady){clearInterval(t);doPlay2();} },300); }
       }
       break;
   }
