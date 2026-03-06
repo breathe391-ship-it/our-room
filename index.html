@@ -155,7 +155,23 @@
     .queue-remove { background:none; border:none; color:var(--rose-light); font-size:1rem; cursor:pointer; padding:2px 6px; transition:color 0.2s; }
     .queue-remove:hover { color:var(--rose); }
 
-    /* ── POEMS / CHAT ── */
+    /* ── Player controls ── */
+    .player-controls {
+      display:flex; align-items:center; justify-content:center; gap:8px; margin-bottom:14px;
+    }
+    .player-btn {
+      display:flex; align-items:center; justify-content:center;
+      width:36px; height:36px; border-radius:50%;
+      border:1.5px solid var(--rose-light); background:#fff;
+      color:var(--ink-soft); cursor:pointer; font-size:0.9rem;
+      transition:all 0.2s; flex-shrink:0;
+    }
+    .player-btn:hover { background:var(--rose); border-color:var(--rose); color:#fff; }
+    .player-btn.active { background:var(--rose); border-color:var(--rose); color:#fff; }
+    .player-btn-wide {
+      width:auto; padding:0 14px; border-radius:999px;
+      font-size:0.78rem; letter-spacing:0.06em; text-transform:uppercase;
+    }
     .poem-section { margin-bottom:24px; }
     .poem-label { font-family:'Dancing Script',cursive; font-size:0.85rem; color:var(--gold); letter-spacing:0.1em; text-transform:uppercase; margin-bottom:10px; }
     .poem-textarea {
@@ -494,6 +510,11 @@
   </div>
   <div class="drawer-body">
     <div id="yt-player-wrap"><div id="yt-player"></div></div>
+    <div class="player-controls">
+      <button class="player-btn" onclick="playPrev()" title="previous">⏮</button>
+      <button class="player-btn" onclick="playNext()" title="next">⏭</button>
+      <button class="player-btn player-btn-wide" id="shuffle-btn" onclick="toggleShuffle()" title="shuffle">⇄ shuffle</button>
+    </div>
     <div class="yt-input-row">
       <input class="yt-input" id="yt-url-input" placeholder="paste a youtube link…" onkeydown="if(event.key==='Enter')addToQueue()"/>
       <button class="yt-add-btn" onclick="addToQueue()">add</button>
@@ -969,9 +990,35 @@ function removeFromQueue(idx,e){
   renderQueue();
   sendData({type:'queue-sync',queue,currentQueueIdx});
 }
+let shuffleOn = false;
+function toggleShuffle(){
+  shuffleOn = !shuffleOn;
+  document.getElementById('shuffle-btn').classList.toggle('active', shuffleOn);
+  showToast(shuffleOn ? 'shuffle on 🔀' : 'shuffle off');
+}
+function playPrev(){
+  if(!queue.length) return;
+  const idx = shuffleOn
+    ? Math.floor(Math.random()*queue.length)
+    : (currentQueueIdx - 1 + queue.length) % queue.length;
+  playQueueItem(idx, true);
+}
+function playNext(){
+  if(!queue.length) return;
+  const idx = shuffleOn
+    ? Math.floor(Math.random()*queue.length)
+    : (currentQueueIdx + 1) % queue.length;
+  playQueueItem(idx, true);
+}
 function onYTStateChange(e){
-  if(ignoreYT)return;
-  if(e.data===0){const n=currentQueueIdx+1;if(n<queue.length)playQueueItem(n,true);}
+  if(ignoreYT) return;
+  if(e.data===0){ // song ended
+    if(!queue.length) return;
+    const next = shuffleOn
+      ? Math.floor(Math.random()*queue.length)
+      : currentQueueIdx + 1;
+    if(next < queue.length) playQueueItem(next, true);
+  }
 }
 
 // ── WEBRTC ──
