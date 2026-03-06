@@ -299,23 +299,25 @@
       box-shadow:0 4px 22px var(--shadow);
       display:flex; align-items:center; justify-content:center;
     }
-    .screen-card video { width:100%; height:100%; object-fit:contain; display:block; }
+    .screen-card video { position:absolute; inset:0; width:100%; height:100%; object-fit:contain; display:block; z-index:1; }
     .screen-card-ph {
       display:flex; flex-direction:column; align-items:center; justify-content:center;
       gap:8px; color:rgba(255,255,255,0.2); font-family:'Dancing Script',cursive;
-      font-style:italic; font-size:0.85rem; text-align:center; position:absolute; inset:0;
+      font-style:italic; font-size:0.85rem; text-align:center; position:absolute; inset:0; z-index:2;
+      background:#0a0014;
     }
+    .screen-card-ph.hidden { display:none; }
     .screen-card-ph .icon { font-size:2.2rem; }
     .screen-card-label {
-      position:absolute; bottom:10px; left:12px;
+      position:absolute; bottom:10px; left:12px; z-index:3;
       background:rgba(0,0,0,0.55); color:#fff; border-radius:999px;
       padding:3px 12px; font-family:'Dancing Script',cursive; font-size:0.9rem;
     }
     .screen-card-expand {
-      position:absolute; top:10px; right:10px;
+      position:absolute; top:10px; right:10px; z-index:3;
       background:rgba(0,0,0,0.5); border:1px solid rgba(255,255,255,0.25);
       color:rgba(255,255,255,0.8); border-radius:8px; cursor:pointer;
-      font-size:0.72rem; padding:4px 10px; transition:all 0.2s; z-index:5;
+      font-size:0.72rem; padding:4px 10px; transition:all 0.2s;
     }
     .screen-card-expand:hover { background:var(--rose); border-color:var(--rose); color:#fff; }
 
@@ -1063,6 +1065,7 @@ async function startConnect(){
     document.getElementById('my-peer-id').textContent=id;
     showToast("you're in! waiting for "+(myRole==='Navra'?'Baiko':'Navra')+'… 🕊');
     setupListeners();
+    startScreenReceiver(); // start listening for screen share immediately
     scheduleRetry(theirId);
   });
   peer.on('error',(err)=>{
@@ -1212,27 +1215,21 @@ function setConnected(yes){
 }
 
 function startScreenReceiver(){
-  if(receiverScreenPeer){ return; } // already listening
-  const mySuffix = myRole === 'Navra' ? 'navra' : 'baiko';
-  const theirSuffix = myRole === 'Navra' ? 'baiko' : 'navra';
-  const roomId = document.getElementById('room-input').value.trim().toLowerCase().replace(/\s+/g,'-');
-  const myScreenReceiveId = 'lr2-scr-' + roomId + '-' + theirSuffix; // I receive on THEIR outgoing ID? No —
-  // Convention: Navra sends on lr2-scr-room-navra, Baiko listens on lr2-scr-room-navra (calls baiko)
-  // So receiver peer ID = lr2-scr-rcv-room-mySuffix
-  const rcvId = 'lr2-scr-rcv-' + roomId + '-' + mySuffix;
-  receiverScreenPeer = new Peer(rcvId, { debug: 0 });
-  receiverScreenPeer.on('open', () => {
-    receiverScreenPeer.on('call', (call) => {
-      call.answer(); // no stream — we just receive
-      call.on('stream', (s) => {
-        showTheirScreen(s);
-        incomingScreenCall = call;
-      });
+  if(receiverScreenPeer) return;
+  const me   = myRole==='Navra' ? 'navra' : 'baiko';
+  const room = document.getElementById('room-input').value.trim().toLowerCase().replace(/\s+/g,'-');
+  const rcvId = 'ss-rcv-'+room+'-'+me;  // must match what sender calls: ss-rcv-{room}-{them}
+  receiverScreenPeer = new Peer(rcvId, {debug:0});
+  receiverScreenPeer.on('open', ()=>{
+    receiverScreenPeer.on('call', call=>{
+      call.answer();
+      incomingScreenCall = call;
+      call.on('stream', s=>showTheirScreen(s));
       call.on('close', hideTheirScreen);
       call.on('error', hideTheirScreen);
     });
   });
-  receiverScreenPeer.on('error', (e) => { console.warn('rcvScreenPeer err', e); });
+  receiverScreenPeer.on('error', e=>console.warn('rcvPeer',e.type));
 }
 // ── Screen share (inline, no tray) ──
 function showScreenSection(){
@@ -1260,7 +1257,7 @@ function closeExpand(){
 function showTheirScreen(stream){
   document.getElementById('remote-screen-video').srcObject = stream;
   const other = myRole==='Navra'?'Baiko':'Navra';
-  document.getElementById('sc-their-ph').style.display = 'none';
+  document.getElementById('sc-their-ph').classList.add('hidden');
   document.getElementById('sc-their-lbl').textContent = other+"'s screen";
   document.getElementById('sc-their-lbl').style.display = 'block';
   document.getElementById('sc-their-exp').style.display = 'block';
@@ -1269,7 +1266,7 @@ function showTheirScreen(stream){
 }
 function hideTheirScreen(){
   document.getElementById('remote-screen-video').srcObject = null;
-  document.getElementById('sc-their-ph').style.display = 'flex';
+  document.getElementById('sc-their-ph').classList.remove('hidden');
   document.getElementById('sc-their-lbl').style.display = 'none';
   document.getElementById('sc-their-exp').style.display = 'none';
   showScreenSection();
@@ -1282,7 +1279,7 @@ async function toggleScreenShare(){
   catch(e){ showToast('screen share cancelled 🌸'); return; }
 
   document.getElementById('local-screen-video').srcObject = screenStream;
-  document.getElementById('sc-my-ph').style.display = 'none';
+  document.getElementById('sc-my-ph').classList.add('hidden');
   document.getElementById('sc-my-lbl').textContent = (myRole||'you')+"'s screen";
   document.getElementById('sc-my-lbl').style.display = 'block';
   document.getElementById('sc-my-exp').style.display = 'block';
@@ -1310,7 +1307,7 @@ async function toggleScreenShare(){
 function stopScreenShare(){
   if(screenStream){screenStream.getTracks().forEach(t=>t.stop()); screenStream=null;}
   document.getElementById('local-screen-video').srcObject = null;
-  document.getElementById('sc-my-ph').style.display = 'flex';
+  document.getElementById('sc-my-ph').classList.remove('hidden');
   document.getElementById('sc-my-lbl').style.display = 'none';
   document.getElementById('sc-my-exp').style.display = 'none';
   screenSharing = false;
@@ -1366,8 +1363,8 @@ function hangUp(){
   // reset screen section
   document.getElementById('local-screen-video').srcObject=null;
   document.getElementById('remote-screen-video').srcObject=null;
-  document.getElementById('sc-my-ph').style.display='flex';
-  document.getElementById('sc-their-ph').style.display='flex';
+  document.getElementById('sc-my-ph').classList.remove('hidden');
+  document.getElementById('sc-their-ph').classList.remove('hidden');
   document.getElementById('sc-my-lbl').style.display='none';
   document.getElementById('sc-their-lbl').style.display='none';
   document.getElementById('sc-my-exp').style.display='none';
